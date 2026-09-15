@@ -127,6 +127,7 @@
         <input type="file" id="file" accept=".gpl,.hex,.pal,.txt,.json,.css,text/plain">
       </label>
       <button id="sampleBtn">Load sample palette</button>
+      <button id="loadExample" class="primary">🎨 Load example image</button>
       <button id="clearBtn">Clear</button>
     </div>
     <div class="hint">Accepted: <code>#RRGGBB</code>, <code>#RGB</code>, <code>rgb(r,g,b)</code>, <code>rgba(r,g,b,a)</code>, <code>name</code> (CSS names), or full <code>.gpl</code>/<code>.hex</code>/<code>.pal</code>/<code>.txt</code> file contents. Duplicates are kept — remove them if you want.</div>
@@ -446,6 +447,94 @@
     flash("Sample 16-color palette loaded", true);
   }
 
+  function medianCut(pixels, n) {
+    // pixels: array of [r,g,b]; returns n hex strings
+    var buckets = pixels.map(function (p) { return { r: [p[0]], g: [p[1]], b: [p[2]] }; });
+    function spread(b) {
+      function sp(arr) { var m = Math.min.apply(null, arr), M = Math.max.apply(null, arr); return M - m; }
+      return Math.max(sp(b.r), sp(b.g), sp(b.b));
+    }
+    while (buckets.length < n) {
+      buckets.sort(function (a, b) { return spread(b) - spread(a); });
+      var big = buckets.shift();
+      if (!big || (Math.min(big.r.length, big.g.length, big.b.length) < 2)) { buckets.push(big); break; }
+      var ch;
+      var sr = (Math.max.apply(null, big.r) - Math.min.apply(null, big.r));
+      var sg = (Math.max.apply(null, big.g) - Math.min.apply(null, big.g));
+      var sb = (Math.max.apply(null, big.b) - Math.min.apply(null, big.b));
+      if (sr >= sg && sr >= sb) ch = "r"; else if (sg >= sb) ch = "g"; else ch = "b";
+      var arr = big[ch].slice().sort(function (a, b) { return a - b; });
+      var mid = arr[Math.floor(arr.length / 2)];
+      var b1 = { r: [], g: [], b: [] }, b2 = { r: [], g: [], b: [] };
+      for (var i = 0; i < big.r.length; i++) {
+        if (big[ch][i] < mid) { b1.r.push(big.r[i]); b1.g.push(big.g[i]); b1.b.push(big.b[i]); }
+        else { b2.r.push(big.r[i]); b2.g.push(big.g[i]); b2.b.push(big.b[i]); }
+      }
+      if (!b1.r.length) { b1 = { r: [mid], g: [mid], b: [mid] }; }
+      if (!b2.r.length) { b2 = { r: [mid], g: [mid], b: [mid] }; }
+      buckets.push(b1, b2);
+    }
+    return buckets.map(function (b) {
+      function avg(a) { var s = 0; for (var i = 0; i < a.length; i++) s += a[i]; return Math.round(s / a.length); }
+      return toHex(avg(b.r), avg(b.g), avg(b.b));
+    });
+  }
+
+  function loadExample() {
+    // Draw a 64x32 pixel-art scene (sky, sun, hills, house, tree) on a canvas,
+    // then extract its palette with median-cut and feed it through the same path as an upload.
+    var W = 64, H = 32;
+    var cv = document.createElement("canvas");
+    cv.width = W; cv.height = H;
+    var ctx = cv.getContext("2d");
+    function px(x, y, c) { ctx.fillStyle = c; ctx.fillRect(x, y, 1, 1); }
+    // sky gradient bands
+    var sky = ["#29366f", "#29366f", "#3b5dc9", "#3b5dc9", "#41a6f6", "#41a6f6", "#73eff7", "#73eff7"];
+    for (var y = 0; y < 16; y++) for (var x = 0; x < W; x++) px(x, y, sky[Math.min(7, Math.floor(y / 2))]);
+    // sun
+    for (var y = 2; y <= 8; y++) for (var x = 44; x <= 52; x++) {
+      var dx = x - 48, dy = y - 5;
+      if (dx * dx + dy * dy <= 16) px(x, y, "#ffcd75");
+    }
+    // far hill
+    for (var x = 0; x < W; x++) {
+      var hy = 16 + Math.round(2 * Math.sin(x / 7));
+      for (var y = hy; y < 22; y++) px(x, y, "#257179");
+    }
+    // near ground
+    for (var x = 0; x < W; x++) for (var y = 22; y < H; y++) px(x, y, "#38b764");
+    // grass tufts
+    for (var x = 2; x < W; x += 5) { px(x, 21, "#a7f070"); px(x + 1, 21, "#a7f070"); }
+    // house
+    for (var x = 8; x <= 20; x++) for (var y = 14; y <= 21; y++) px(x, y, "#f4f4f4");
+    for (var x = 9; x <= 19; x++) px(x, 13, "#b13e53");
+    for (var x = 10; x <= 18; x++) px(x, 12, "#b13e53");
+    for (var x = 11; x <= 17; x++) px(x, 11, "#b13e53");
+    for (var x = 12; x <= 16; x++) px(x, 10, "#b13e53");
+    px(13, 9, "#b13e53"); px(14, 9, "#b13e53"); px(15, 9, "#b13e53"); px(16, 9, "#b13e53");
+    // door + window
+    for (var x = 12; x <= 14; x++) for (var y = 17; y <= 21; y++) px(x, y, "#5d275d");
+    for (var x = 16; x <= 18; x++) for (var y = 15; y <= 17; y++) px(x, y, "#73eff7");
+    // tree
+    for (var x = 26; x <= 32; x++) for (var y = 12; y <= 18; y++) {
+      var dx = x - 29, dy = y - 15;
+      if (dx * dx + dy * dy <= 12) px(x, y, "#228b22");
+    }
+    for (var y = 18; y <= 21; y++) { px(29, y, "#8b4513"); px(30, y, "#8b4513"); }
+    // clouds
+    [[4, 3, 7], [55, 12, 6]].forEach(function (c) {
+      for (var x = c[0]; x <= c[0] + c[2]; x++) for (var y = c[1]; y <= c[1] + 1; y++) px(x, y, "#f4f4f4");
+    });
+    // collect pixels
+    var data = ctx.getImageData(0, 0, W, H).data;
+    var pixels = [];
+    for (var i = 0; i < data.length; i += 4) pixels.push([data[i], data[i + 1], data[i + 2]]);
+    var palette = medianCut(pixels, 16);
+    input.value = palette.join("\n");
+    handleInput();
+    flash("Example image loaded — 16 colors extracted from a 64×32 pixel-art scene", true);
+  }
+
   function handleInput() {
     var text = input.value;
     if (!text.trim()) { current = []; refresh(); return; }
@@ -482,6 +571,7 @@
     });
 
     $("sampleBtn").addEventListener("click", loadSample);
+    $("loadExample").addEventListener("click", loadExample);
     $("clearBtn").addEventListener("click", function () {
       input.value = "";
       handleInput();
